@@ -7,6 +7,8 @@ import numpy as np
 import tiktoken
 from datasets import load_dataset # huggingface datasets
 
+os.environ["HF_DATASETS_CACHE"] = "/proj/rep-learning-robotics/users/x_nonra/.cache/"
+
 # number of workers in .map() call
 # good number to use is ~order number of cpu cores // 2
 num_proc = 8
@@ -20,7 +22,11 @@ enc = tiktoken.get_encoding("gpt2")
 
 if __name__ == '__main__':
     # takes 54GB in huggingface .cache dir, about 8M documents (8,013,769)
-    dataset = load_dataset("openwebtext", num_proc=num_proc_load_dataset)
+    try:
+        dataset = load_dataset("openwebtext", num_proc=num_proc_load_dataset, trust_remote_code=True)
+    except UnicodeDecodeError as e:
+        import traceback
+        traceback.print_exc()
 
     # owt by default only contains the 'train' split, so create a test split
     split_dataset = dataset["train"].train_test_split(test_size=0.0005, seed=2357, shuffle=True)

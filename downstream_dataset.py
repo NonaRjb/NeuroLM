@@ -712,3 +712,53 @@ class WorkloadLoader(Dataset):
         prompt_len = self.prompt.size(0)
         Y_text[prompt_len - 1:valid_text_len - 1] = text[prompt_len:valid_text_len]
         return X_eeg, text, Y_text, input_chans, input_time, eeg_mask.bool(), gpt_mask.bool()
+
+def THINGSEEG2Loader(Dataset):
+    def __init__(self, root, files, sampling_rate=200, eeg_max_len=-1, text_max_len=-1, is_instruct=False, is_val=False, split='train', subjects=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]):
+        
+        self.root = root
+        self.files = files
+        self.default_rate = 200
+        self.sampling_rate = sampling_rate
+        self.is_instruct = is_instruct
+        self.is_val = is_val
+        self.eeg_max_len = eeg_max_len
+        self.text_max_len = text_max_len
+        
+        split_to_file = {
+            'train': 'preprocessed_eeg_training.npy',
+            'val': 'preprocessed_eeg_validation.np',
+            'test': 'preprocessed_eeg_test.npy'
+        }
+
+        self.img_parent_dir  = os.path.join(self.data_path, 'images')
+        self.img_metadata = np.load(os.path.join(self.img_parent_dir, 'image_metadata.npy'),
+	            allow_pickle=True).item()
+        self.img_concepts = self.img_metadata['test_img_concepts'] if self.split == 'test' else self.img_metadata['train_img_concepts']
+        self.img_files = self.img_metadata['test_img_files'] if self.split == 'test' else self.img_metadata['train_img_files']
+
+        self.eeg_data_list = []
+        self.labels_list = []
+        self.subj_list = []
+
+        for s in subjects: 
+            if s not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+                raise ValueError(f"Invalid subject {s}. Valid subjects are [1-10].")
+            eeg_parent_dir = os.path.join(self.root, 'sub-'+format(s,'02'))
+            eeg_data = np.load(os.path.join(eeg_parent_dir, split_to_file[split]), allow_pickle=True).item()
+            
+            subject_eeg_data = eeg_data['preprocessed_eeg_data']
+
+            if self.channel_names is None:
+                self.channel_names = eeg_data['ch_names']
+            
+
+            
+
+        
+        if is_instruct:
+            pass
+
+
+    def __len__(self):
+        return

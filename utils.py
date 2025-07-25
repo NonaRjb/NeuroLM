@@ -112,6 +112,9 @@ def prepare_Workload_dataset(root, is_instruct=False, eeg_max_len=-1, text_max_l
     print(len(train_files), len(val_files), len(test_files))
     return train_dataset, test_dataset, val_dataset
 
+def prepare_THINGS_EEG2_dataset(root, is_instruct=False, eeg_max_len=-1, text_max_len=-1):
+    pass
+
 
 def get_metrics(output, target, metrics, is_binary):
     if is_binary:
