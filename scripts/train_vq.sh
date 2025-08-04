@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #SBATCH -A berzelius-2025-35
 #SBATCH --mem 350GB
-#SBATCH --gpus=8
+#SBATCH --gpus=4
 #SBATCH -t 10:00:00
 #SBATCH --mail-type FAIL
-#SBATCH --output /proj/rep-learning-robotics/users/x_nonra/NeuroLM/logs/%A_%a_slurm.out
-#SBATCH --error  /proj/rep-learning-robotics/users/x_nonra/NeuroLM/logs/%A_%a_slurm.err
+#SBATCH --output /proj/rep-learning-robotics/users/x_nonra/NeuroLM/logs/%J_slurm.out
+#SBATCH --error  /proj/rep-learning-robotics/users/x_nonra/NeuroLM/logs/%J_slurm.err
 
 
 cd /proj/rep-learning-robotics/users/x_nonra/NeuroLM/
@@ -15,11 +15,16 @@ conda activate NeuroLM
 dataset_dir=/proj/rep-learning-robotics/users/x_nonra/NeuroLM/data/things_eeg_2/processed/
 out_dir=/proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/
 wandb_api_key=REMOVED_API_KEY
+wandb_runname=train_vq_J${SLURM_JOB_ID}_$(date +%Y-%m-%d)
 
-OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=8 train_vq.py \
+
+OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=4 train_vq.py \
     --dataset_dir $dataset_dir \
     --out_dir $out_dir \
+    --batch_size 32 \
+    --warmup_epochs 0 \
+    --epochs 55 \
     --wandb_log \
     --wandb_project EEG_4M \
-    --wandb_runname test_vq_train \
+    --wandb_runname $wandb_runname \
     --wandb_api_key $wandb_api_key \

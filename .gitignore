@@ -3,6 +3,7 @@ data/*
 logs/
 wandb/
 output/
+NeuroLM/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

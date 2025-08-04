@@ -21,10 +21,13 @@ from pathlib import Path
 from utils import cosine_scheduler
 import math
 
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
 
 master_process = None; device = None; dtype = None
 ctx = None; ddp_rank = None; device_type = None
 ddp = None; ddp_world_size = None; ddp_local_rank = None
+torch.serialization.add_safe_globals([np._core.multiarray.scalar])
 
 
 def init(args):
@@ -88,10 +91,16 @@ def main(args):
         return x, y
 
 
-    print('prepare dataloader...')
+    print('prepare train dataloader...')
     files = Path(args.dataset_dir, 'train').rglob('*.pkl')
     files = [file for file in files]
     dataset_train = PickleLoader(files)
+    print('finished!')
+
+    print('prepare val dataloader...')
+    files = Path(args.dataset_dir, 'val').rglob('*.pkl')
+    files = [file for file in files]
+    dataset_val = PickleLoader(files)
     print('finished!')
 
     if ddp:
@@ -114,6 +123,28 @@ def main(args):
             drop_last=True,
             shuffle=True
         )
+
+    # Add validation dataloader
+    if ddp:
+        # Use DistributedSampler for val
+        sampler_val = torch.utils.data.DistributedSampler(dataset_val, num_replicas=ddp_world_size, rank=ddp_rank, shuffle=False)
+        data_loader_val = torch.utils.data.DataLoader(
+            dataset_val,
+            batch_size=args.batch_size,
+            sampler=sampler_val,
+            num_workers=4,
+            pin_memory=True,
+            drop_last=False
+        )
+    else:
+        data_loader_val = torch.utils.data.DataLoader(
+            dataset_val,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+
 
     # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
     iter_num = 0
@@ -163,6 +194,7 @@ def main(args):
                 state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
         model.load_state_dict(state_dict)
         iter_num = checkpoint['iter_num']
+        print(f"iter_num = {iter_num}")
         start_epoch = checkpoint['epoch'] + 1
 
     model.to(device)
@@ -177,10 +209,10 @@ def main(args):
     checkpoint = None # free up memory
 
     # compile the model
-    if compile:
-        print("compiling the model... (takes a ~minute)")
-        unoptimized_model = model
-        model = torch.compile(model) # requires PyTorch 2.0
+    # if compile:
+    #     print("compiling the model... (takes a ~minute)")
+    #     unoptimized_model = model
+    #     model = torch.compile(model, backend="eager") # requires PyTorch 2.0
 
     # wrap model into DDP container
     if ddp:
@@ -189,28 +221,35 @@ def main(args):
     # logging
     if args.wandb_log and master_process:
         import wandb
-        os.environ["WANDB_API_KEY"] = args.wandb_api_keys
-        wandb.init(project=args.wandb_project, name=args.wandb_run_name, dir=os.path.join(args.out_dir, 'wandb'), resume=True)
+        os.environ["WANDB_API_KEY"] = args.wandb_api_key
+        os.makedirs(os.path.join(args.out_dir, 'wandb'), exist_ok=True)
+        wandb.init(project=args.wandb_project, name=args.wandb_runname, dir=os.path.join(args.out_dir, 'wandb'), resume=False)
 
-    num_training_steps_per_epoch = len(dataset_train) // args.batch_size // ddp_world_size
+    num_training_steps_per_epoch = len(dataset_train) // args.batch_size // ddp_world_size   # this would be different for each set of dataset size, batch size and number of gpus -> affects len(lr_schedule_values)
     lr_schedule_values = cosine_scheduler(
-        args.learning_rate, args.min_lr, args.epochs, num_training_steps_per_epoch,
+        args.learning_rate, args.min_lr, args.epochs - start_epoch, num_training_steps_per_epoch,   # originally: args.epochs
         warmup_epochs=args.warmup_epochs
     )
-
+    print("len(lr_schedule_values) =", len(lr_schedule_values))
 
     # training loop
     X_text, Y_text = get_batch('train') # fetch the very first batch
+    # X_text_val, Y_text_val = get_batch('val') # fetch the very first batch for validation
     t0 = time.time()
     local_iter_num = 0 # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model # unwrap DDP container if needed
+
+    if args.epochs < start_epoch:
+        print("Warning: args.epochs is less than start_epoch, args.epochs will be set to start_epoch+args.epochs")
+        args.epochs = start_epoch + args.epochs
+
     for epoch in range(start_epoch, args.epochs):
         for step, (batch) in enumerate(data_loader_train):
             # determine and set the learning rate for this iteration
-            lr = lr_schedule_values[iter_num] if args.decay_lr else args.learning_rate
+            # lr = lr_schedule_values[iter_num] if args.decay_lr else args.learning_rate    # TODO: this is the original line but it throws error when starting from a checkpoint (iter_num > len(lr_schedule_values))
+            lr = lr_schedule_values[local_iter_num] if args.decay_lr else args.learning_rate
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
-
             # forward backward update, with optional gradient accumulation to simulate larger batch size
             # and using the GradScaler if data type is float16
             if ddp:
@@ -273,6 +312,63 @@ def main(args):
             iter_num += 1
             local_iter_num += 1
         
+        # -------------------------------
+        # Run validation
+        # -------------------------------
+        if data_loader_val is not None:
+            print(f"Running validation at epoch {epoch}...")
+            model.eval()
+            val_loss_total = 0.0
+            val_freq_loss = 0.0
+            val_raw_loss = 0.0
+            val_quant_loss = 0.0
+            val_domain_loss = 0.0
+            num_batches = 0
+
+            with torch.no_grad():
+                for batch in data_loader_val:
+                    X, Y_freq, Y_raw, input_chans, input_time, input_mask = batch
+                    X = X.float().to(device, non_blocking=True)
+                    Y_freq = Y_freq.float().to(device, non_blocking=True)
+                    Y_raw = Y_raw.float().to(device, non_blocking=True)
+                    input_chans = input_chans.to(device, non_blocking=True)
+                    input_time = input_time.to(device, non_blocking=True)
+                    input_mask = input_mask.to(device, non_blocking=True)
+
+                    with ctx:
+                        alpha = 1.0  # Fixed domain alignment weight for validation
+                        loss, domain_loss, log = model(X, Y_freq, Y_raw, input_chans, input_time, input_mask, alpha)
+
+                        X_text_val, _ = get_batch('val')
+                        # text_domain_loss = model(X_text_val)
+
+                        val_loss_total += log['val/total_loss']
+                        val_freq_loss += log['val/rec_freq_loss']
+                        val_raw_loss += log['val/rec_raw_loss']
+                        val_quant_loss += log['val/quant_loss']
+                        # val_domain_loss += log['val/domain_loss'] + text_domain_loss.item()
+                        num_batches += 1
+
+                   
+            val_loss_total /= num_batches
+            val_freq_loss /= num_batches
+            val_raw_loss /= num_batches
+            val_quant_loss /= num_batches
+            val_domain_loss /= num_batches
+
+            print(f"Validation: total loss {val_loss_total:.4f}, freq loss {val_freq_loss:.4f}, raw loss {val_raw_loss:.4f}, quant loss {val_quant_loss:.4f}, domain loss {val_domain_loss:.4f}")
+
+            if args.wandb_log and master_process:
+                wandb.log({
+                    "epoch": epoch,
+                    "val/total_loss": val_loss_total,
+                    "val/freq_loss": val_freq_loss,
+                    "val/raw_loss": val_raw_loss,
+                    "val/quant_loss": val_quant_loss,
+                    "val/domain_loss": val_domain_loss
+                })
+            model.train()
+
         if master_process:
             checkpoint = {
                 'model': raw_model.state_dict(),
@@ -288,7 +384,7 @@ def main(args):
             if (epoch + 1) % args.save_ckpt_freq == 0:
                 print(f"saving checkpoint {epoch} to {checkpoint_out_dir}")
                 torch.save(checkpoint, os.path.join(checkpoint_out_dir, f'ckpt-{epoch}.pt'))
-
+    
     if ddp:
         destroy_process_group()
 

@@ -147,6 +147,7 @@ def epoch_data(root, sub, n_ses, data_part, seed):
         del raw
         epochs.resample(sfreq=200, n_jobs=5)
         ch_names = epochs.info['ch_names']
+        ch_names = [ch.upper() for ch in ch_names]
         times = epochs.times        
         ### Sort the data ###
         data = epochs.get_data(units='uV')
@@ -172,7 +173,7 @@ def epoch_data(root, sub, n_ses, data_part, seed):
             idx = shuffle(idx, random_state=seed, n_samples=max_rep)
             sorted_data[i] = data[idx]
         del data
-        epoched_data.append(sorted_data[:, :, :, 50:])
+        epoched_data.append(sorted_data[:, :, :, 40:]) # Remove the first 40 time points which is the 0.2 s baseline activity
         img_conditions.append(img_cond)
         del sorted_data
 

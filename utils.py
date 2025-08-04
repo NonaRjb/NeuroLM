@@ -13,6 +13,7 @@ from metrics import binary_metrics_fn, multiclass_metrics_fn
 
 def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0,
                      start_warmup_value=0, warmup_steps=-1):
+    print(f"epochs = {epochs}, niter_per_ep = {niter_per_ep}, warmup_epochs = {warmup_epochs}, warmup_steps = {warmup_steps}")
     warmup_schedule = np.array([])
     warmup_iters = warmup_epochs * niter_per_ep
     if warmup_steps > 0:
