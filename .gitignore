@@ -4,6 +4,8 @@ logs/
 wandb/
 output/
 NeuroLM/
+scripts/
+scripts_alvis/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
