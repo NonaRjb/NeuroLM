@@ -17,10 +17,12 @@ from model.model_neurolm import NeuroLM
 from model.model import GPTConfig
 from pathlib import Path
 import tiktoken
-from utils import prepare_TUAB_dataset, prepare_TUEV_dataset, prepare_TUSL_dataset, prepare_HMC_dataset, prepare_Workload_dataset, cosine_scheduler, get_metrics
+from utils import prepare_TUAB_dataset, prepare_TUEV_dataset, prepare_TUSL_dataset, prepare_HMC_dataset, prepare_Workload_dataset, prepare_THINGS_EEG2_dataset, cosine_scheduler, get_metrics
 from downstream_dataset import SEEDDataset
 from torch.utils.data.dataset import ConcatDataset
 
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
 
 master_process = None; device = None; dtype = None
 ctx = None; ddp_rank = None; device_type = None
@@ -33,6 +35,7 @@ def init(args):
     backend = 'nccl' # 'nccl', 'gloo', etc.
     device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    print("dtype = ", dtype)
     
     ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
     if ddp:
@@ -56,7 +59,7 @@ def init(args):
     device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
     # note: float16 data type will automatically use a GradScaler
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-    ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=torch.float32)
 
 
 def get_instruct_datasets(args, downstream_dataset: str, eeg_max_len=-1, text_max_len=-1):
@@ -117,6 +120,14 @@ def get_instruct_datasets(args, downstream_dataset: str, eeg_max_len=-1, text_ma
             dataset_info['is_binary'] = True
             dataset_info['result_idx'] = 9
             dataset_info['label_dic'] = {'Yes': 1, 'No': 0}
+        
+        elif downstream_dataset == 'THINGS_EEG2':
+            dataset_train, dataset_test, dataset_val = prepare_THINGS_EEG2_dataset(Path(args.dataset_dir, 'things_eeg_2'), is_instruct=True,
+                                                                            eeg_max_len=eeg_max_len, text_max_len=text_max_len)
+            dataset_info['metrics'] = ["bleu", "rouge", "meteor", "bert_score"]
+            dataset_info['is_binary'] = False
+            dataset_info['num_classes'] = -1 # not used
+
 
         dataset_info['dataset_train'] = dataset_train
         dataset_info['dataset_val'] = dataset_val
@@ -210,7 +221,8 @@ def main(args):
 
     concat_datasets = True
     all_datasets = []
-    for name in ['TUAB', 'TUEV', 'SEED', 'HMC', 'Workload', 'TUSL']:
+    # for name in ['TUAB', 'TUEV', 'SEED', 'HMC', 'Workload', 'TUSL']:
+    for name in ['THINGS_EEG2']:
         all_datasets.append(get_instruct_datasets(args, name, eeg_max_len=276, text_max_len=80))
     if concat_datasets:
         merge_datasets = ConcatDataset([dataset_info['dataset_train'] for dataset_info in all_datasets])
@@ -319,10 +331,10 @@ def main(args):
     checkpoint = None # free up memory
 
     # compile the model
-    if compile:
-        print("compiling the model... (takes a ~minute)")
-        unoptimized_model = model
-        model = torch.compile(model) # requires PyTorch 2.0
+    # if compile:
+    #     print("compiling the model... (takes a ~minute)")
+    #     unoptimized_model = model
+    #     model = torch.compile(model) # requires PyTorch 2.0
 
     # wrap model into DDP container
     if ddp:
@@ -332,10 +344,10 @@ def main(args):
     if args.wandb_log and master_process:
         import wandb
         os.environ["WANDB_API_KEY"] = args.wandb_api_key
-        wandb.init(project=args.wandb_project, name=args.wandb_run_name, dir=os.path.join(args.out_dir, 'wandb'), resume=True)
+        wandb.init(project=args.wandb_project, name=args.wandb_runname, dir=os.path.join(args.out_dir, 'wandb'), resume=True)
 
 
-    num_training_steps_per_epoch = sum([len(dataset['dataset_train']) for dataset in all_datasets]) // args.batch_size // ddp_world_size
+    num_training_steps_per_epoch = sum([len(dataset['dataset_train']) for dataset in all_datasets]) // args.eeg_batch_size // ddp_world_size    # this was args.batch_size but it does not exist!
     lr_schedule_values = cosine_scheduler(
         args.learning_rate, args.min_lr, args.epochs, num_training_steps_per_epoch,
         warmup_epochs=args.warmup_epochs, warmup_steps=int(args.warmup_ratio * num_training_steps_per_epoch * args.epochs)
@@ -389,10 +401,23 @@ def main(args):
                     
                     model.train()
 
-                    loss = (loss1 + loss2) / args.gradient_accumulation_steps # scale the loss to account for gradient accumulation
+                    loss = (loss1.float() + loss2.float()) / args.gradient_accumulation_steps # scale the loss to account for gradient accumulation
                 # immediately async prefetch next batch while model is doing the forward pass on the GPU
                 # backward pass, with gradient scaling if training in fp16
                 scaler.scale(loss).backward()
+                try:
+                    wte = dict(model.named_parameters())["module.GPT2.transformer.wte.weight"]
+                    if wte.grad is not None:
+                        wte.grad.clamp_(-1.0, 1.0)
+                except KeyError:
+                    pass
+                
+                all_finite = True
+                for n, p in model.named_parameters():
+                    if p.grad is not None and not torch.isfinite(p.grad).all():
+                        print("Non‑finite grad in", n)
+                        all_finite = False
+                        break
 
                 if (step + 1) % args.gradient_accumulation_steps == 0:
                     # clip the gradient
@@ -475,6 +500,20 @@ def main(args):
 def get_pred(pred_string, dataset_info):
     if dataset_info['name'] == 'zuco':
         pred = pred_string[17:].split('<|endoftext|>')[0]
+    elif dataset_info['name'] == 'THINGS_EEG2':
+        # --- captioning branch: parse everything after "Answer:" ---
+        s = pred_string
+        key = "Answer:"
+        # take substring after "Answer:" if present
+        if key in s:
+            s = s.split(key, 1)[1]
+        # stop at end-of-text if present
+        s = s.split("<|endoftext|>")[1]
+        # basic cleanup
+        s = s.strip().strip('"').split("\n")[0].strip()
+        # fallback if we accidentally stripped to empty
+        pred = s if s else pred_string.strip()
+
     else:
         pred = -1
         try:
@@ -493,6 +532,10 @@ def evaluate(model, dataset_info, dataloader, decode):
     model.eval()
     preds = []
     targets = []
+
+    is_caption = any(m in dataset_info.get('metrics', []) 
+                     for m in ['bleu', 'meteor', 'rouge', 'bert_score']) \
+                 or dataset_info.get('name') == 'THINGS_EEG2'
     for _, (batch) in enumerate(dataloader):
         X_eeg, X_text, label, input_chans, input_time, input_mask, gpt_mask = batch
         X_eeg = X_eeg.float().to(device, non_blocking=True)
@@ -502,25 +545,31 @@ def evaluate(model, dataset_info, dataloader, decode):
         gpt_mask = gpt_mask.to(device, non_blocking=True)
         if input_mask is not None:
             input_mask = input_mask.to(device, non_blocking=True)
-
         with ctx:
-            text = model.generate(X_eeg, X_text, input_chans, input_time, input_mask, eeg_text_mask=gpt_mask, max_new_tokens=5)
+            text = model.generate(X_eeg, X_text, input_chans, input_time, input_mask, eeg_text_mask=gpt_mask, max_new_tokens=32)    # originally 5
             text = text[:, 1:] # remove [SEP] token
             for i, t in enumerate(text):
                 pred_string = decode(t.tolist())
 
                 pred = get_pred(pred_string, dataset_info)
-                if not dataset_info['is_binary']:
+                if not dataset_info['is_binary'] and dataset_info.get('num_classes', -1) != -1:
                     pred = np.eye(dataset_info['num_classes'])[pred]
                 preds.append(pred)
 
-            targets.append(label)
+            targets.extend(label)
     
     model.train()
 
-    targets = torch.cat(targets, dim=0).numpy()
-    preds = np.array(preds)
-    results = get_metrics(preds, targets, dataset_info['metrics'], dataset_info['is_binary'])
+    if is_caption:
+        # preds, targets are lists of strings
+        results = get_metrics(preds, targets, dataset_info['metrics'], is_binary=False)
+    else:
+        targets = torch.cat(targets, dim=0).numpy()
+        preds = np.array(preds)
+        results = get_metrics(preds, targets, dataset_info['metrics'], dataset_info['is_binary'])
+    # targets = torch.cat(targets, dim=0).numpy()
+    # preds = np.array(preds)
+    # results = get_metrics(preds, targets, dataset_info['metrics'], dataset_info['is_binary'])
 
     return results
 
@@ -529,7 +578,7 @@ def get_args():
     parser = argparse.ArgumentParser('VQ training script', add_help=False)
     parser.add_argument('--out_dir', default='./', help='path where to save, empty for no saving')
     parser.add_argument('--dataset_dir', default='./', help='path where to save, empty for no saving')
-    parser.add_argument('--tokenizer_path', default='checkpoints/VQ.py', help='path where tokenizer is')
+    parser.add_argument('--tokenizer_path', default='checkpoints/VQ.pt', help='path where tokenizer is')
     parser.add_argument('--NeuroLM_path', default='checkpoints/NeuroLM-B.pt', help='path where NeuroLM model is')
     parser.add_argument('--log_interval', default=10, type=int)
     parser.add_argument('--eval_only', default=False, action='store_true')

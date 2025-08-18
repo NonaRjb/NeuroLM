@@ -7,7 +7,7 @@ https://github.com/935963004/NeuroLM
 import math
 import numpy as np
 import os
-from downstream_dataset import TUABLoader, TUEVLoader, TUSLLoader, HMCLoader, WorkloadLoader
+from downstream_dataset import TUABLoader, TUEVLoader, TUSLLoader, HMCLoader, WorkloadLoader, THINGSEEG2Loader
 from metrics import binary_metrics_fn, multiclass_metrics_fn
 
 
@@ -114,26 +114,67 @@ def prepare_Workload_dataset(root, is_instruct=False, eeg_max_len=-1, text_max_l
     return train_dataset, test_dataset, val_dataset
 
 def prepare_THINGS_EEG2_dataset(root, is_instruct=False, eeg_max_len=-1, text_max_len=-1):
-    pass
+    train_files = os.listdir(os.path.join(root, "processed", "train"))
+    val_files = os.listdir(os.path.join(root, "processed", "val"))
+    test_files = os.listdir(os.path.join(root, "processed", "test"))
+
+    print(len(train_files), len(val_files), len(test_files))
+
+    # prepare training and test data loader
+    train_dataset = THINGSEEG2Loader(os.path.join(root, "processed", "train"), train_files, is_instruct=is_instruct, eeg_max_len=eeg_max_len, text_max_len=text_max_len)
+    test_dataset = THINGSEEG2Loader(os.path.join(root, "processed", "test"), test_files, is_instruct=is_instruct, is_val=True, eeg_max_len=eeg_max_len, text_max_len=text_max_len)
+    val_dataset = THINGSEEG2Loader(os.path.join(root, "processed", "val"), val_files, is_instruct=is_instruct, is_val=True, eeg_max_len=eeg_max_len, text_max_len=text_max_len)
+    print(len(train_files), len(val_files), len(test_files))
+    return train_dataset, test_dataset, val_dataset
 
 
 def get_metrics(output, target, metrics, is_binary):
+    # Captioning path: metrics list contains NLP metrics
+    if any(m in metrics for m in ['bleu', 'meteor', 'rouge', 'bert_score']):
+        # output: List[str] (preds), target: List[str] or List[List[str]]
+        try:
+            import evaluate
+        except Exception:
+            raise RuntimeError("Please `pip install evaluate` for caption metrics.")
+        out = {}
+        # normalize references to list[list[str]]
+        refs = [[r] if isinstance(r, str) else r for r in target]
+
+        if 'bleu' in metrics:
+            bleu = evaluate.load("bleu")
+            out['bleu'] = bleu.compute(predictions=output, references=refs)['bleu']
+        if 'meteor' in metrics:
+            meteor = evaluate.load("meteor")
+            out['meteor'] = meteor.compute(predictions=output,
+                                           references=[r[0] for r in refs])['meteor']
+        if 'rouge' in metrics:
+            rouge = evaluate.load("rouge")
+            out['rouge'] = rouge.compute(predictions=output,
+                                         references=[r[0] for r in refs])['rougeL']
+        if 'bert_score' in metrics:
+            bs = evaluate.load("bertscore")
+            res = bs.compute(predictions=output,
+                             references=[r[0] for r in refs],
+                             model_type="microsoft/deberta-xlarge-mnli")
+            out['bert_score'] = float(np.mean(res['f1']))
+        return out
+
     if is_binary:
         if 'roc_auc' not in metrics or sum(target) * (len(target) - sum(target)) != 0:  # to prevent all 0 or all 1 and raise the AUROC error
-            results = binary_metrics_fn(
+            return binary_metrics_fn(
                 target,
                 output,
                 metrics=metrics
             )
         else:
-            results = {
+            return {
                 "accuracy": 0.0,
                 "balanced_accuracy": 0.0,
                 "pr_auc": 0.0,
                 "roc_auc": 0.0,
             }
     else:
-        results = multiclass_metrics_fn(
+        return multiclass_metrics_fn(
             target, output, metrics=metrics
         )
-    return results
+

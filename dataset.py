@@ -59,8 +59,8 @@ class PickleLoader(Dataset):
         if len(data.shape) > 2:
             data = data.mean(axis=0)  # average across repetitions if data is 3D
 
-        ch_names = [ch.upper() for ch in sample["ch_names"]]   # Temporary: ensure channel names are uppercase
-        # ch_names = sample["ch_names"]
+        # ch_names = [ch.upper() for ch in sample["ch_names"]]   # Temporary: ensure channel names are uppercase
+        ch_names = sample["ch_names"]
         data = torch.FloatTensor(data / 100)
 
         time = data.size(1) // 200

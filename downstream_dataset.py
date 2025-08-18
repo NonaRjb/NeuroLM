@@ -713,8 +713,8 @@ class WorkloadLoader(Dataset):
         Y_text[prompt_len - 1:valid_text_len - 1] = text[prompt_len:valid_text_len]
         return X_eeg, text, Y_text, input_chans, input_time, eeg_mask.bool(), gpt_mask.bool()
 
-def THINGSEEG2Loader(Dataset):
-    def __init__(self, root, files, sampling_rate=200, eeg_max_len=-1, text_max_len=-1, is_instruct=False, is_val=False, split='train', subjects=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]):
+class THINGSEEG2Loader(Dataset):
+    def __init__(self, root, files, sampling_rate=200, eeg_max_len=-1, text_max_len=-1, is_instruct=False, is_val=False):
         
         self.root = root
         self.files = files
@@ -725,40 +725,94 @@ def THINGSEEG2Loader(Dataset):
         self.eeg_max_len = eeg_max_len
         self.text_max_len = text_max_len
         
-        split_to_file = {
-            'train': 'preprocessed_eeg_training.npy',
-            'val': 'preprocessed_eeg_validation.np',
-            'test': 'preprocessed_eeg_test.npy'
-        }
+        self.enc = tiktoken.get_encoding("gpt2")
+        self.encode = lambda s: self.enc.encode(s, allowed_special={"<|endoftext|>"})
 
-        self.img_parent_dir  = os.path.join(self.data_path, 'images')
-        self.img_metadata = np.load(os.path.join(self.img_parent_dir, 'image_metadata.npy'),
-	            allow_pickle=True).item()
-        self.img_concepts = self.img_metadata['test_img_concepts'] if self.split == 'test' else self.img_metadata['train_img_concepts']
-        self.img_files = self.img_metadata['test_img_files'] if self.split == 'test' else self.img_metadata['train_img_files']
-
-        self.eeg_data_list = []
-        self.labels_list = []
-        self.subj_list = []
-
-        for s in subjects: 
-            if s not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
-                raise ValueError(f"Invalid subject {s}. Valid subjects are [1-10].")
-            eeg_parent_dir = os.path.join(self.root, 'sub-'+format(s,'02'))
-            eeg_data = np.load(os.path.join(eeg_parent_dir, split_to_file[split]), allow_pickle=True).item()
-            
-            subject_eeg_data = eeg_data['preprocessed_eeg_data']
-
-            if self.channel_names is None:
-                self.channel_names = eeg_data['ch_names']
-            
-
-            
-
-        
         if is_instruct:
-            pass
-
+            # 50257 for [SEP]
+            self.text = torch.IntTensor([50257] + self.encode('Question: What is shown in the photo? Answer: '))
+            self.prompt = torch.IntTensor([50257] + self.encode('Question: What is shown in the photo? Answer: '))
 
     def __len__(self):
-        return
+        return len(self.files)
+    
+    def __getitem__(self, index):
+        sample = pickle.load(open(os.path.join(self.root, self.files[index]), "rb"))
+        X = sample["X"]
+        Y = sample["y"]
+
+        # Temporary: I have to flatten the repetitions dimension
+        if len(X.shape) > 2:
+            X = X.mean(axis=0)  # average across repetitions if data is 3D
+
+        data = torch.FloatTensor(X / 100)
+        time = data.size(1) // 200
+        input_time = [i  for i in range(time) for _ in range(data.size(0))]
+        data = rearrange(data, 'N (A T) -> (A N) T', T=200)     # Patching
+
+        ch_names = sample["ch_names"]
+        input_chans = list(ch_names) * time
+
+        if not self.is_instruct:
+            input_chans = torch.IntTensor(get_chans(input_chans))
+            input_time = torch.IntTensor(input_time)
+
+            gpt_mask = torch.tril(torch.ones(data.size(0), data.size(0))).view(1, data.size(0), data.size(0))
+            num_chans = len(ch_names)
+            for i in range(time):
+                gpt_mask[:, i * num_chans:(i + 1) * num_chans,  i * num_chans:(i + 1) * num_chans] = 1
+            return data, Y, input_chans, input_time, gpt_mask.bool()
+        
+        if self.is_val:
+            text = self.prompt
+        else:
+            text = torch.IntTensor([50257] + self.encode('Question: What is shown in the photo? Answer: ' + Y + ' <|endoftext|>'))
+            # pad text to text_max_len
+            valid_text_len = text.size(0)
+            if self.text_max_len > valid_text_len:
+                text_pad = torch.full((self.text_max_len,), fill_value=50256)
+                text_pad[:valid_text_len] = text
+                text = text_pad
+
+        # pad eeg to eeg_max_len
+        valid_eeg_len = data.size(0)
+        if self.eeg_max_len > data.size(0):
+            X_eeg = torch.zeros((self.eeg_max_len, 200))
+            X_eeg[:data.size(0)] = data
+            eeg_mask = torch.ones(self.eeg_max_len)
+            eeg_mask[valid_eeg_len:] = 0
+
+            input_chans.extend(['pad'] * (self.eeg_max_len - data.size(0)))
+            input_time.extend([0] * (self.eeg_max_len - data.size(0)))
+        else:
+            X_eeg = data
+            eeg_mask = torch.ones(data.size(0))
+
+        input_chans = torch.IntTensor(get_chans(input_chans))
+        input_time = torch.IntTensor(input_time)
+
+        num_tokens = X_eeg.size(0) + text.size(0)
+        gpt_mask = torch.tril(torch.ones(num_tokens, num_tokens)).view(1, num_tokens, num_tokens)
+        num_chans = len(ch_names)
+        for i in range(time):
+            gpt_mask[:, i * num_chans:(i + 1) * num_chans,  i * num_chans:(i + 1) * num_chans] = 1
+        gpt_mask[:, :, valid_eeg_len:X_eeg.size(0)] = 0
+        
+        if self.is_val:
+            return X_eeg, text, Y, input_chans, input_time, eeg_mask.bool(), gpt_mask.bool()
+        
+        Y_text = torch.full_like(text, fill_value=-1)
+        # prompt_len = self.prompt.size(0) - 1      # original
+        prompt_len = self.prompt.size(0)
+        Y_text[prompt_len - 1:valid_text_len - 1] = text[prompt_len:valid_text_len]
+
+        # DEBUG
+        num_targets = (Y_text != -1).sum().item()
+        # print("valid_text_len:", valid_text_len, " --- prompt_len:", prompt_len, " --- ((Y_text != -1).sum()):", ((Y_text != -1).sum()))
+        assert num_targets > 0, f"No supervised tokens (answer) in Y_text. prompt_len={answer_start}, valid_text_len={valid_text_len}."
+        assert text.dtype == torch.long and Y_text.dtype == torch.long
+        assert torch.all((Y_text == -1) | ((Y_text >= 0) & (Y_text < 50304)))  # if you enlarged to 50304
+
+
+
+        return X_eeg, text, Y_text, input_chans, input_time, eeg_mask.bool(), gpt_mask.bool()

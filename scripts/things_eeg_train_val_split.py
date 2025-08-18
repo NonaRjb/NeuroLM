@@ -11,6 +11,9 @@ save_path = "/proj/rep-learning-robotics/users/x_nonra/NeuroLM/data/things_eeg_2
 train_concepts = data['train_img_concepts']  # This has 16540 elements (1654 concepts × 10)
 train_files = data['train_img_files']
 
+train_captions = np.load('/proj/rep-learning-robotics/users/x_nonra/NeuroLM/data/things_eeg_2/captions/train_captions.npy', allow_pickle=True).item()
+test_captions = np.load('/proj/rep-learning-robotics/users/x_nonra/NeuroLM/data/things_eeg_2/captions/test_captions.npy', allow_pickle=True).item()
+
 # Constants
 samples_per_concept = 10
 num_total_concepts = len(train_concepts) // samples_per_concept
@@ -37,6 +40,7 @@ for cid in excluded_concept_ids:
 selected_metadata = {
     'img_concepts': [train_concepts[i] for i in selected_indices],
     'img_files':    [train_files[i] for i in selected_indices],
+    'captions':    [train_captions[train_files[i]] for i in selected_indices],
     'indices':      selected_indices  # store the original indices
 }
 
@@ -47,6 +51,7 @@ np.save(os.path.join(save_path, 'image_metadata_train.npy'), selected_metadata)
 excluded_metadata = {
     'img_concepts': [train_concepts[i] for i in excluded_indices],
     'img_files':    [train_files[i] for i in excluded_indices],
+    'captions':    [train_captions[train_files[i]] for i in excluded_indices],
     'indices':      excluded_indices
 }
 np.save(os.path.join(save_path, 'image_metadata_val.npy'), excluded_metadata)
@@ -60,6 +65,7 @@ test_indices = list(range(len(test_concepts)))  # Just 0...N-1
 test_metadata = {
     'img_concepts': test_concepts,
     'img_files': test_files,
+    'captions': [test_captions[file] for file in test_files],
     'indices': test_indices
 }
 np.save(os.path.join(save_path, 'image_metadata_test.npy'), test_metadata)

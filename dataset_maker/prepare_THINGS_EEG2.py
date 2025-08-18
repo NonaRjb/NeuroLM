@@ -35,7 +35,8 @@ def split_and_dump(train_data, test_data, save_path, sub, ch_names, times, train
         for i, sample in enumerate(data):
             sample_dict = {
                 'X': sample,
-                'y': metadata['img_files'][i],
+                # 'y': metadata['img_files'][i],
+                'y': metadata['captions'][i],
                 'ch_names': channels,
                 'times': t,
             }

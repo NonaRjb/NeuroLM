@@ -110,8 +110,25 @@ class NeuroLM(nn.Module):
             input_mask = input_mask.unsqueeze(1).repeat(1, x_eeg.size(1), 1).unsqueeze(1)
             x_eeg = self.tokenizer(x_eeg, input_chans, input_time, input_mask, return_all_tokens=True)
             x_eeg = self.encode_transform_layer(x_eeg)
-            x_eeg += self.pos_embed(input_chans)   
+            pos = self.pos_embed(input_chans)                  # (B, L, d)
+            assert torch.isfinite(pos).all(), "NaN in pos_embed table or channel ids"
+            x_eeg += self.pos_embed(input_chans) 
 
+        # PROBE A: are encoder features finite?
+        if x_eeg is not None:
+            assert torch.isfinite(x_eeg).all(), "NaN in tokenizer/encode_transform/pos_embed output"
+
+        # PROBE B: are channel ids in range for pos_embed?
+        if input_chans is not None:
+            max_chan = int(input_chans.max().item()); min_chan = int(input_chans.min().item())
+            assert 0 <= min_chan and max_chan < self.pos_embed.num_embeddings, f"input_chans out of range [{min_chan},{max_chan}]"
+
+        # PROBE C (optional): mask sanity if you can pass it in here
+        # if eeg_text_mask is used inside GPT, validate before call:
+        # row must have at least one True
+        if eeg_text_mask is not None:
+            assert eeg_text_mask.any(dim=-1).all(), "Some attention rows have no allowed keys"
+        
         logits, loss, accuracy = self.GPT2(x_eeg, y_eeg, x_text, y_text, input_time, eeg_mask, eeg_text_mask)
 
         log = {}
