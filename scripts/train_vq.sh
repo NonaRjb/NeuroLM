@@ -8,17 +8,21 @@
 #SBATCH --error  /proj/rep-learning-robotics/users/x_nonra/NeuroLM/logs/%J_slurm.err
 
 
-cd /proj/rep-learning-robotics/users/x_nonra/NeuroLM/
-module load Miniforge3/24.7.1-2-hpc1-bdist
-conda activate NeuroLM
+export SSL_CERT_FILE=/proj/rep-learning-robotics/users/x_nonra/wandb_cert/cacert.pem
+export HF_HOME=/proj/rep-learning-robotics/users/x_nonra/.cache/   
+export HF_HUB_CACHE=$HF_HOME/hub/
+export HF_DATASETS_CACHE=$HF_HOME/dataset
 
+cd /proj/rep-learning-robotics/users/x_nonra/NeuroLM/
+
+CONTAINER=/proj/rep-learning-robotics/users/x_nonra/containers/neurolm.sif
 dataset_dir=/proj/rep-learning-robotics/users/x_nonra/NeuroLM/data/things_eeg_2/processed/
 out_dir=/proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/
 wandb_api_key=$(</proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/wandb/.wandb_key.txt)
 wandb_runname=train_vq_J${SLURM_JOB_ID}_$(date +%Y-%m-%d)
 
 
-OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=3 train_vq.py \
+apptainer exec --nv $CONTAINER OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=3 train_vq.py \
     --dataset_dir $dataset_dir \
     --out_dir $out_dir \
     --batch_size 32 \

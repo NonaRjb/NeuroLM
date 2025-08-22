@@ -268,7 +268,7 @@ def main(args):
         print(f"Resuming training from {args.out_dir}")
         # resume training from a checkpoint.
         ckpt_path = os.path.join(checkpoint_out_dir, 'ckpt.pt')
-        checkpoint = torch.load(ckpt_path, map_location=device)
+        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
         checkpoint_model_args = checkpoint['model_args']
         # force these config attributes to be equal otherwise we can't even resume training
         # the rest of the attributes (e.g. dropout) can stay as desired from command line
@@ -300,7 +300,7 @@ def main(args):
         print(f"Initializing training from {args.NeuroLM_path}")
         # resume training from a checkpoint.
         ckpt_path = os.path.join(args.out_dir, args.NeuroLM_path)
-        checkpoint = torch.load(ckpt_path, map_location=device)
+        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
         checkpoint_model_args = checkpoint['model_args']
         # force these config attributes to be equal otherwise we can't even resume training
         # the rest of the attributes (e.g. dropout) can stay as desired from command line
@@ -344,7 +344,7 @@ def main(args):
     if args.wandb_log and master_process:
         import wandb
         os.environ["WANDB_API_KEY"] = args.wandb_api_key
-        wandb.init(project=args.wandb_project, name=args.wandb_runname, dir=os.path.join(args.out_dir, 'wandb'), resume=True)
+        wandb.init(project=args.wandb_project, name=args.wandb_runname, dir=os.path.join(args.out_dir, 'wandb'), resume=False)
 
 
     num_training_steps_per_epoch = sum([len(dataset['dataset_train']) for dataset in all_datasets]) // args.eeg_batch_size // ddp_world_size    # this was args.batch_size but it does not exist!
@@ -503,12 +503,13 @@ def get_pred(pred_string, dataset_info):
     elif dataset_info['name'] == 'THINGS_EEG2':
         # --- captioning branch: parse everything after "Answer:" ---
         s = pred_string
+        print(f'pred_string: {pred_string}')
         key = "Answer:"
         # take substring after "Answer:" if present
         if key in s:
             s = s.split(key, 1)[1]
         # stop at end-of-text if present
-        s = s.split("<|endoftext|>")[1]
+        s = s.split("<|endoftext|>")[0]
         # basic cleanup
         s = s.strip().strip('"').split("\n")[0].strip()
         # fallback if we accidentally stripped to empty
