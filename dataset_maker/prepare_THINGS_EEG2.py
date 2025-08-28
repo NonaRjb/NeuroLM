@@ -95,14 +95,14 @@ def split_and_dump(train_data, test_data, save_path, sub, ch_names, times, train
     save_sample_wise(merged_train, ch_names, times, img_metadata_train, split='train')
     save_sample_wise(merged_val, ch_names, times, img_metadata_val, split='val') 
     
-    os.makedirs(os.path.join(save_dir, 'sub-'+format(sub,'02')), exist_ok=True)
+    # os.makedirs(os.path.join(save_dir, 'sub-'+format(sub,'02')), exist_ok=True)
     
-    with open(os.path.join(save_dir, 'sub-'+format(sub,'02'), filename_test), 'wb') as f:
-        pickle.dump(test_dict, f, protocol=4)
-    with open(os.path.join(save_dir, 'sub-'+format(sub,'02'), filename_train), 'wb') as f:
-        pickle.dump(train_dict, f, protocol=4)
-    with open(os.path.join(save_dir, 'sub-'+format(sub,'02'), filename_val), 'wb') as f:
-        pickle.dump(val_dict, f, protocol=4)
+    # with open(os.path.join(save_dir, 'sub-'+format(sub,'02'), filename_test), 'wb') as f:
+    #     pickle.dump(test_dict, f, protocol=4)
+    # with open(os.path.join(save_dir, 'sub-'+format(sub,'02'), filename_train), 'wb') as f:
+    #     pickle.dump(train_dict, f, protocol=4)
+    # with open(os.path.join(save_dir, 'sub-'+format(sub,'02'), filename_val), 'wb') as f:
+    #     pickle.dump(val_dict, f, protocol=4)
 
     return
 

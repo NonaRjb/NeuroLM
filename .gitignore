@@ -4,7 +4,7 @@ logs/
 wandb/
 output/
 NeuroLM/
-scripts/
+# scripts/
 scripts_alvis/
 
 # Byte-compiled / optimized / DLL files

@@ -172,7 +172,7 @@ def main(args):
         print(f"Resuming training from {checkpoint_out_dir}")
         # resume training from a checkpoint.
         ckpt_path = os.path.join(checkpoint_out_dir, 'ckpt.pt')
-        checkpoint = torch.load(ckpt_path, map_location=device)
+        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
         checkpoint_model_args = checkpoint['encoder_args']
         # force these config attributes to be equal otherwise we can't even resume training
         # the rest of the attributes (e.g. dropout) can stay as desired from command line
