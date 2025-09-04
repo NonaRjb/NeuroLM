@@ -26,10 +26,11 @@ export HF_DATASETS_CACHE=$HF_HOME/dataset
 cd /proj/rep-learning-robotics/users/x_nonra/NeuroLM/
 
 CONTAINER=/proj/rep-learning-robotics/users/x_nonra/containers/neurolm.sif
-dataset_dir=/scratch/local/x_nonra/data/things_eeg_2/processed/
+dataset_dir=/scratch/local/x_nonra/data/
 out_dir=/proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/
+tokenizer_path=/proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/checkpoints/VQ/ckpt-59.pt
 wandb_api_key=$(</proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/wandb/.wandb_key.txt)
-wandb_runname=train_vq_J${SLURM_JOB_ID}_$(date +%Y-%m-%d)
+wandb_runname=train_instruct_J${SLURM_JOB_ID}_$(date +%Y-%m-%d)
 
 apptainer exec --nv \
   --env OMP_NUM_THREADS=1 \
@@ -39,27 +40,15 @@ apptainer exec --nv \
   --env HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
   --env SSL_CERT_FILE="$SSL_CERT_FILE" \
   "$CONTAINER" \
-  torchrun --nnodes=1 --nproc_per_node=1 train_vq.py \
-    --dataset_dir "$dataset_dir" \
-    --out_dir "$out_dir" \
-    --batch_size 32 \
-    --warmup_epochs 0 \
-    --epochs 60 \
-    --wandb_log \
-    --wandb_project EEG_4M \
-    --wandb_api_key $wandb_api_key \
-    --wandb_runname "$wandb_runname"
-
+  torchrun --nnodes=1 --nproc_per_node=1 train_instruction.py \
+  --dataset_dir $dataset_dir \
+  --out_dir $out_dir \
+  --tokenizer_path $tokenizer_path\
+  --NeuroLM_path /proj/rep-learning-robotics/users/x_nonra/NeuroLM/NeuroLM/checkpoints/NeuroLM-B.pt \
+  --wandb_log \
+  --wandb_project EEG_4M \
+  --wandb_runname $wandb_runname \
+  --wandb_api_key $wandb_api_key \
 
 rm -rf /scratch/local/x_nonra/data/things_eeg_2
 echo "tmp data removed"
-# apptainer exec --nv $CONTAINER OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=4 train_vq.py \
-#     --dataset_dir $dataset_dir \
-#     --out_dir $out_dir \
-#     --batch_size 32 \
-#     --warmup_epochs 0 \
-#     --epochs 55 \
-#     --wandb_log \
-#     --wandb_project EEG_4M \
-#     --wandb_runname $wandb_runname \
-#     --wandb_api_key $wandb_api_key \

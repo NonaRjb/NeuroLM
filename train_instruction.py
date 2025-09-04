@@ -503,7 +503,7 @@ def get_pred(pred_string, dataset_info):
     elif dataset_info['name'] == 'THINGS_EEG2':
         # --- captioning branch: parse everything after "Answer:" ---
         s = pred_string
-        print(f'pred_string: {pred_string}')
+        # print(f'pred_string: {pred_string}')
         key = "Answer:"
         # take substring after "Answer:" if present
         if key in s:
