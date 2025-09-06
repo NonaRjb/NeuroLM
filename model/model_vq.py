@@ -148,6 +148,8 @@ class VQ(nn.Module):
         
         xrec_freq, xrec_raw = self.decode(quantize, input_chans, input_time, mask)
 
+        print(xrec_freq.shape, y_freq.shape, xrec_raw.shape, y_raw.shape, input_mask.shape)
+
         loss_freq_mask = input_mask.unsqueeze(-1).repeat(1, 1, xrec_freq.size(-1))
         loss_raw_mask = input_mask.unsqueeze(-1).repeat(1, 1, xrec_raw.size(-1))
         rec_freq_loss = self.calculate_rec_loss(xrec_freq * loss_freq_mask, y_freq)
@@ -194,9 +196,10 @@ class VQ_Align(nn.Module):
     def __init__(self, 
                  encoder_config,
                  decoder_config,
+                 decoder_out_dim=200,
                  ):
         super(VQ_Align, self).__init__()
-        self.VQ = VQ(encoder_config, decoder_config)
+        self.VQ = VQ(encoder_config, decoder_config, decoder_out_dim=decoder_out_dim)
         self.domain_classifier = nn.Sequential(
                 nn.Linear(decoder_config.n_embd, 256),
                 nn.GELU(),

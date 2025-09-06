@@ -91,16 +91,18 @@ def main(args):
         return x, y
 
 
+    P = args.patch_size
+    H = args.overlap_size
     print('prepare train dataloader...')
     files = Path(args.dataset_dir, 'train').rglob('*.pkl')
     files = [file for file in files]
-    dataset_train = PickleLoader(files)
+    dataset_train = PickleLoader(files, patch_size=P, overlap_size=H)
     print('finished!')
 
     print('prepare val dataloader...')
     files = Path(args.dataset_dir, 'val').rglob('*.pkl')
     files = [file for file in files]
-    dataset_val = PickleLoader(files)
+    dataset_val = PickleLoader(files, patch_size=P, overlap_size=H)
     print('finished!')
 
     if ddp:
@@ -166,7 +168,7 @@ def main(args):
         # determine the vocab size we'll use for from-scratch training
         encoder_conf = NTConfig(**encoder_args)
         decoder_conf = NTConfig(**decoder_args)
-        model = VQ_Align(encoder_conf, decoder_conf)
+        model = VQ_Align(encoder_conf, decoder_conf, decoder_out_dim=P)
         start_epoch = 0
     elif init_from == 'resume':
         print(f"Resuming training from {checkpoint_out_dir}")
@@ -406,6 +408,9 @@ def get_args():
     parser.add_argument('--warmup_epochs', default=5, type=int)
     parser.add_argument('--save_ckpt_freq', default=10, type=int)
     parser.add_argument('--block_size', default=1024, type=int)
+
+    parser.add_argument('--patch_size', type=int, default=200, help='number of samples in each patch')
+    parser.add_argument('--overlap_size', type=int, default=200, help='number of overlapping samples between adjacent patches')
 
     parser.add_argument('--learning_rate', type=float, default=5e-5, metavar='LR',
                         help='learning rate (default: 5e-5)')

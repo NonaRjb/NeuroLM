@@ -29,9 +29,11 @@ standard_1020 = [
 
 
 class PickleLoader(Dataset):
-    def __init__(self, files, block_size=1024, sampling_rate=200, GPT_training=False):
+    def __init__(self, files, block_size=1024, sampling_rate=200, GPT_training=False, patch_size=200, overlap_size=100):
         self.files = files
         self.default_rate = 200
+        self.patch_size = patch_size
+        self.overlap_size = overlap_size
         self.sampling_rate = sampling_rate
         self.block_size = block_size
         self.GPT_training = GPT_training
@@ -63,21 +65,46 @@ class PickleLoader(Dataset):
         ch_names = sample["ch_names"]
         data = torch.FloatTensor(data / 100)
 
-        time = data.size(1) // 200
-        input_time = [i  for i in range(time) for _ in range(data.size(0))]
+        ########### Original Code ###########
+        # time = data.size(1) // self.sampling_rate
+        # input_time = [i  for i in range(time) for _ in range(data.size(0))]
+        # data = rearrange(data, 'N (A T) -> (A N) T', T=self.patch_size)
+        #####################################
 
-        data = rearrange(data, 'N (A T) -> (A N) T', T=200)
+        N = data.size(0)
+        T_total = data.size(1)
+        P = self.patch_size              # keep patch length = 200 samples
+        H = self.overlap_size            # hop (e.g., 100 for 50% overlap)
+
+        # Ensure we have at least one full window; right-pad minimally if needed
+        pad_right = 0
+        if T_total < P:
+            pad_right = P - T_total
+        if pad_right > 0:
+            data = torch.nn.functional.pad(data, (0, pad_right))
+            T_total = data.size(1)
+
+        # Make overlapping windows per channel: [N, W, 200]
+        W = 1 + (T_total - P) // H
+        data_win = data.unfold(dimension=1, size=P, step=H)[:, :W, :]   # [N, W, 200]
+
+        # Flatten to tokens [(W*N), 200] exactly like before
+        data = rearrange(data_win, 'N A T -> (A N) T')   # A=W here
+
+        # Build time indices like before, but A is now W
+        time = W
+        input_time = [i for i in range(time) for _ in range(N)]
         
-        X = torch.zeros((self.block_size, 200))
+        X = torch.zeros((self.block_size, self.patch_size))
         X[:data.size(0)] = data
 
         if not self.GPT_training:
-            Y_freq = torch.zeros((self.block_size, 100))
-            Y_raw = torch.zeros((self.block_size, 200))
+            Y_freq = torch.zeros((self.block_size, self.patch_size // 2))
+            Y_raw = torch.zeros((self.block_size, self.patch_size))
             x_fft = torch.fft.fft(data, dim=-1)
             amplitude = torch.abs(x_fft)
             amplitude = self.std_norm(amplitude)
-            Y_freq[:data.size(0)] = amplitude[:, :100]
+            Y_freq[:data.size(0)] = amplitude[:, :self.patch_size // 2]
             Y_raw[:data.size(0)] = self.std_norm(data)
         
         # input_chans is the indices of the channels in the standard_1020 list

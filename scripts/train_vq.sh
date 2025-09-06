@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#SBATCH -A berzelius-2025-35
+#SBATCH -A berzelius-2025-278
 #SBATCH --mem 200GB
-#SBATCH --gpus=1
+#SBATCH --gpus=2
 #SBATCH -t 10:00:00
 #SBATCH --mail-type FAIL
 #SBATCH --output /proj/rep-learning-robotics/users/x_nonra/NeuroLM/logs/%J_slurm.out
@@ -32,7 +32,7 @@ wandb_api_key=$(</proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/wandb/
 wandb_runname=train_vq_J${SLURM_JOB_ID}_$(date +%Y-%m-%d)
 
 apptainer exec --nv \
-  --env OMP_NUM_THREADS=1 \
+  --env OMP_NUM_THREADS=2 \
   --env WANDB_API_KEY="$wandb_api_key" \
   --env HF_HOME="$HF_HOME" \
   --env HF_HUB_CACHE="$HF_HUB_CACHE" \
@@ -45,6 +45,8 @@ apptainer exec --nv \
     --batch_size 32 \
     --warmup_epochs 0 \
     --epochs 60 \
+    --patch_size 50 \
+    --overlap_size 25 \
     --wandb_log \
     --wandb_project EEG_4M \
     --wandb_api_key $wandb_api_key \

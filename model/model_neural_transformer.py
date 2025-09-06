@@ -29,7 +29,8 @@ class TemporalConv(nn.Module):
         self.norm3 = nn.GroupNorm(4, out_chans)
         self.gelu3 = nn.GELU()
         self.l = nn.Sequential(
-            nn.Linear(400, 768),
+            # nn.Linear(400, 768),
+            nn.Linear(112, 768),    # TODO: make it configurable. It's now hard-coded for patch_size=50, overlap=25
             nn.GELU()
         )
 
