@@ -32,7 +32,7 @@ wandb_api_key=$(</proj/rep-learning-robotics/users/x_nonra/NeuroLM/output/wandb/
 wandb_runname=train_vq_J${SLURM_JOB_ID}_$(date +%Y-%m-%d)
 
 apptainer exec --nv \
-  --env OMP_NUM_THREADS=2 \
+  --env OMP_NUM_THREADS=1 \
   --env WANDB_API_KEY="$wandb_api_key" \
   --env HF_HOME="$HF_HOME" \
   --env HF_HUB_CACHE="$HF_HUB_CACHE" \
@@ -43,8 +43,8 @@ apptainer exec --nv \
     --dataset_dir "$dataset_dir" \
     --out_dir "$out_dir" \
     --batch_size 32 \
-    --warmup_epochs 0 \
-    --epochs 60 \
+    --warmup_epochs 2 \
+    --epochs 10 \
     --patch_size 50 \
     --overlap_size 25 \
     --wandb_log \

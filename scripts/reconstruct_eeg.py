@@ -2,6 +2,7 @@ import torch
 import matplotlib.pyplot as plt
 import argparse
 from pathlib import Path
+import os
 
 from model.model_vq import VQ_Align
 from dataset import PickleLoader
@@ -43,7 +44,7 @@ def vq_reconstruct_tokens(model, X, input_chans, input_time, input_mask, device=
     return X_valid.squeeze(0).cpu(), xrec_valid.squeeze(0).cpu(), \
            chans_valid.squeeze(0).cpu(), times_valid.squeeze(0).cpu()
 
-def plot_token_overlay(X_tok, Xrec_tok, title="Token overlay"):
+def plot_token_overlay(X_tok, Xrec_tok, title="Token overlay", output_dir="./output/reconstruction/"):
     # X_tok, Xrec_tok: [200]
     print(X_tok.shape)
     X_tok = std_norm(X_tok)
@@ -56,7 +57,7 @@ def plot_token_overlay(X_tok, Xrec_tok, title="Token overlay"):
     plt.ylabel("Std. amplitude")
     plt.legend()
     plt.tight_layout()
-    plt.savefig("token_overlay.png", dpi=300)
+    plt.savefig(os.path.join(output_dir, "token_overlay.png"), dpi=300)
     # plt.show()
 
 def stitch_tokens(tokens, times_valid, N_chans, hop_len=200, patch_len=200):
@@ -114,6 +115,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_dir', type=str, required=True, help='Path to dataset directory containing train/val/test subdirs with .pkl files')
     parser.add_argument('--checkpoint_path', type=str, required=True, help='Path to model checkpoint .pth file')
+    parser.add_argument('--output_dir', type=str, default='./output/reconstruction/', help='Directory to save output plots')
     parser.add_argument('--split', type=str, default='val', choices=['train', 'val', 'test'], help='Which data split to use')
     args = parser.parse_args()
 
@@ -158,7 +160,7 @@ if __name__ == "__main__":
     files = [file for file in files]
     ds = PickleLoader(files, patch_size=P, overlap_size=H)
     # ds = PickleLoader(files=[...], block_size=1024, sampling_rate=200, GPT_training=False, hop_len_samples=200)  # or 100 if overlapped
-    X, Y_freq, Y_raw, input_chans, input_time, input_mask = ds[450]
+    X, Y_freq, Y_raw, input_chans, input_time, input_mask = ds[1300]
 
     # Add batch dim
     X_b = X.unsqueeze(0)                    # [1, N, 200]
@@ -174,7 +176,7 @@ if __name__ == "__main__":
 
     # --- (A) Plot a single token overlay ---
     # Example: first token overall
-    plot_token_overlay(X_valid[17], Xrec_valid[17], title="Token 0 (any channel/time)")
+    plot_token_overlay(X_valid[17], Xrec_valid[17], title="Token 0 (any channel/time)", output_dir=args.output_dir)
 
     # --- (B) Stitch continuous waveform and overlay for one channel ---
     N_chans = len(set(chans_valid.tolist()))  # or len(sample["ch_names"])
@@ -196,5 +198,5 @@ if __name__ == "__main__":
     plt.ylabel("Std. amplitude")
     plt.legend()
     plt.tight_layout()
-    plt.savefig("continuous_overlay.png", dpi=300)
+    plt.savefig(os.path.join(args.output_dir, "continuous_overlay.png"), dpi=300)
     

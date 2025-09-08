@@ -148,8 +148,6 @@ class VQ(nn.Module):
         
         xrec_freq, xrec_raw = self.decode(quantize, input_chans, input_time, mask)
 
-        print(xrec_freq.shape, y_freq.shape, xrec_raw.shape, y_raw.shape, input_mask.shape)
-
         loss_freq_mask = input_mask.unsqueeze(-1).repeat(1, 1, xrec_freq.size(-1))
         loss_raw_mask = input_mask.unsqueeze(-1).repeat(1, 1, xrec_raw.size(-1))
         rec_freq_loss = self.calculate_rec_loss(xrec_freq * loss_freq_mask, y_freq)
