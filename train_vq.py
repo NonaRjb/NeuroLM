@@ -115,6 +115,8 @@ def main(args):
             shuffle=True
         )
 
+    print("len(dataset_train) = ", len(dataset_train))
+    print("number of training steps per epoch = ", len(data_loader_train))
     # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
     iter_num = 0
 
@@ -180,7 +182,7 @@ def main(args):
     if compile:
         print("compiling the model... (takes a ~minute)")
         unoptimized_model = model
-        model = torch.compile(model) # requires PyTorch 2.0
+        model = torch.compile(model, backend="aot_eager") # requires PyTorch 2.0
 
     # wrap model into DDP container
     if ddp:
@@ -189,8 +191,8 @@ def main(args):
     # logging
     if args.wandb_log and master_process:
         import wandb
-        os.environ["WANDB_API_KEY"] = args.wandb_api_keys
-        wandb.init(project=args.wandb_project, name=args.wandb_run_name, dir=os.path.join(args.out_dir, 'wandb'), resume=True)
+        os.environ["WANDB_API_KEY"] = args.wandb_api_key
+        wandb.init(project=args.wandb_project, name=args.wandb_runname, dir=os.path.join(args.out_dir, 'wandb'), resume=True)
 
     num_training_steps_per_epoch = len(dataset_train) // args.batch_size // ddp_world_size
     lr_schedule_values = cosine_scheduler(

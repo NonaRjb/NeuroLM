@@ -23,10 +23,10 @@ standard_1020 = [
     'IZ', 'O10', 'T3', 'T5', 'T4', 'T6', 'M1', 'M2', 'A1', 'A2', \
     'T1', 'T2', 'I1', 'I2'
 ]
-savePath = Path('/D_data/weibangjiang')
-rawDataPath = Path('/D_data/yansen/tuh_data/tuh/edf')
+savePath = Path('/mnt/rajabi/data/tueg/pkl_data/')
+rawDataPath = Path('/mnt/akgokce/datasets/eeg/tueg/edf/')
 group = rawDataPath.rglob('*.edf')
-dump_folder = '../teamdrive/pkl_data'
+dump_folder = '/mnt/rajabi/data/tueg/pkl_data'
 
 # preprocessing parameters
 l_freq = 0.1
